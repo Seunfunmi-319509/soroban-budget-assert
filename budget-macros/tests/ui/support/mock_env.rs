@@ -1,15 +1,18 @@
 //! Minimal stand-in for `soroban_sdk::Env` for the UI tests.
 //!
-//! The macros only emit `env.cost_estimate().budget().<metric>()`, so the UI
-//! tests can exercise every body shape against this mock instead of pulling in
-//! the SDK and compiling a contract. Reported costs are fixed per instance so a
-//! test can decide up front whether the injected assertion should pass or panic.
+//! The macros emit `env.cost_estimate().budget().<metric>()` and/or
+//! `env.cost_estimate().resources().<field>`, so the UI tests can exercise
+//! every body shape against this mock instead of pulling in the SDK and
+//! compiling a contract. Reported costs are fixed per instance so a test can
+//! decide up front whether the injected assertion should pass or panic.
 
 #![allow(dead_code)]
 
 pub struct Env {
     cpu: u64,
     mem: u64,
+    read_bytes: u32,
+    write_bytes: u32,
 }
 
 pub struct CostEstimate<'a> {
@@ -20,9 +23,26 @@ pub struct Budget<'a> {
     env: &'a Env,
 }
 
+#[derive(Clone, Copy)]
+pub struct Resources {
+    pub read_bytes: u32,
+    pub write_bytes: u32,
+}
+
 impl Env {
     pub fn new(cpu: u64, mem: u64) -> Self {
-        Env { cpu, mem }
+        Env {
+            cpu,
+            mem,
+            read_bytes: 0,
+            write_bytes: 0,
+        }
+    }
+
+    pub fn with_read_write(mut self, read_bytes: u32, write_bytes: u32) -> Self {
+        self.read_bytes = read_bytes;
+        self.write_bytes = write_bytes;
+        self
     }
 
     pub fn cost_estimate(&self) -> CostEstimate<'_> {
@@ -33,6 +53,13 @@ impl Env {
 impl<'a> CostEstimate<'a> {
     pub fn budget(&self) -> Budget<'a> {
         Budget { env: self.env }
+    }
+
+    pub fn resources(&self) -> Resources {
+        Resources {
+            read_bytes: self.env.read_bytes,
+            write_bytes: self.env.write_bytes,
+        }
     }
 }
 

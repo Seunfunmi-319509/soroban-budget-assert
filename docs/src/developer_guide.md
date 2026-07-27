@@ -13,7 +13,7 @@ This guide is for developers modifying or extending `soroban-budget-assert` itse
 
 | Crate | Role |
 |---|---|
-| `budget-macros` | Proc-macro crate. `budget_cpu_lt` / `budget_mem_lt` / `budget_lt` / `budget_write_bytes_lt` rewrite a test function's block so a budget assertion against its `env` variable runs on every exit path. They all go through `instrument_exit_paths()`; `ReturnRewriter` handles the `return` cases. |
+| `budget-macros` | Proc-macro crate. `budget_cpu_lt` / `budget_mem_lt` / `budget_read_bytes_lt` / `budget_write_bytes_lt` / `budget_lt` rewrite a test function's block so a budget assertion against its `env` variable runs on every exit path. They all go through `instrument_exit_paths()`; `ReturnRewriter` handles the `return` cases. |
 | `cargo-budget-report` | The CLI (`cargo budget-report` subcommand). Uses `cargo_metadata` for workspace discovery, `wasmparser` for export scanning, shells out to `stellar` for deploy/invoke/XDR decode, and `tabled`/`serde_json` for output. |
 | `amm-pool-contract` | Reference contract (`do_expensive_work`) plus the integration tests that double as the research measurements. |
 
