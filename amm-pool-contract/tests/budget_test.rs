@@ -3,7 +3,9 @@
 use std::sync::{Mutex, PoisonError};
 
 use amm_pool_contract::{ConstantProductPool, ConstantProductPoolClient};
-use budget_macros::{budget_cpu_lt, budget_lt, budget_mem_lt, budget_write_bytes_lt};
+use budget_macros::{
+    budget_cpu_lt, budget_lt, budget_mem_lt, budget_read_bytes_lt, budget_write_bytes_lt,
+};
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 /// Serialises all JSON-config tests so they never read stale `budget.json`
@@ -360,6 +362,7 @@ fn test_budget_macro_json_config_invalid_json() {
 /// acts as a regression guard that will fail if storage reads grow
 /// unexpectedly.
 #[test]
+#[budget_read_bytes_lt(25_000)] // Generous upper bound (measured ~20,236 on CI)
 fn test_read_bytes_budget_within_limit() {
     let env = Env::default();
     let (client, user) = setup_wasm(&env);
@@ -370,13 +373,6 @@ fn test_read_bytes_budget_within_limit() {
 
     let read_bytes = env.cost_estimate().resources().read_bytes;
     println!("Read bytes (WASM deposit+swap+withdraw): {read_bytes}");
-
-    // Generous upper bound (measured ~20,236 on CI) — tighten once a clean baseline is recorded.
-    assert!(
-        read_bytes < 25_000,
-        "Read bytes {read_bytes} exceeded the expected limit of 25,000 \
-         - local estimate, real network cost may differ significantly in either direction"
-    );
 }
 
 /// Fixture: deliberate regression — contract exceeds the read bytes budget.
@@ -389,6 +385,7 @@ fn test_read_bytes_budget_within_limit() {
 #[should_panic(
     expected = "local estimate, real network cost may differ significantly in either direction"
 )]
+#[budget_read_bytes_lt(1)] // Deliberately impossible limit — always exceeded
 fn test_read_bytes_budget_exceeds_limit() {
     let env = Env::default();
     let (client, user) = setup_wasm(&env);
@@ -396,18 +393,6 @@ fn test_read_bytes_budget_exceeds_limit() {
     client.deposit(&user, &10_000_i128, &10_000_i128);
     client.swap(&user, &true, &100_i128, &90_i128);
     client.withdraw(&user, &1_000_i128, &900_i128, &900_i128);
-
-    let read_bytes = env.cost_estimate().resources().read_bytes;
-    println!("Read bytes (deliberate regression): {read_bytes}");
-
-    // Deliberately impossible limit: any real WASM invocation will read more
-    // than 1 byte from ledger storage, so this assertion always fires.
-    let limit: u32 = 1;
-    assert!(
-        read_bytes < limit,
-        "Read bytes {read_bytes} exceeded the expected limit of {limit} \
-         - local estimate, real network cost may differ significantly in either direction"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +446,9 @@ fn test_write_bytes_budget_passes() {
 /// Demonstrates a deliberate write-bytes regression: the limit is set below
 /// the actual cost so the assertion fires and the test panics (as expected).
 #[test]
-#[should_panic(expected = "local estimate, underestimates real network cost")]
+#[should_panic(
+    expected = "local estimate, real network cost may differ significantly in either direction"
+)]
 #[budget_write_bytes_lt(1)] // Unrealistically tight limit — always exceeded
 fn test_write_bytes_budget_regression() {
     let env = Env::default();

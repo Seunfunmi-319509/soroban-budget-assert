@@ -20,6 +20,8 @@ enum BudgetLimit {
 struct BudgetSpec {
     cpu: Option<BudgetLimit>,
     mem: Option<BudgetLimit>,
+    read_bytes: Option<BudgetLimit>,
+    write_bytes: Option<BudgetLimit>,
     env_ident: Option<Ident>,
 }
 
@@ -66,6 +68,10 @@ impl Parse for BudgetSpec {
                 spec.cpu = Some(input.parse()?);
             } else if ident_str == "mem" {
                 spec.mem = Some(input.parse()?);
+            } else if ident_str == "read_bytes" {
+                spec.read_bytes = Some(input.parse()?);
+            } else if ident_str == "write_bytes" {
+                spec.write_bytes = Some(input.parse()?);
             } else {
                 return Err(syn::Error::new(
                     ident.span(),
@@ -78,10 +84,14 @@ impl Parse for BudgetSpec {
             }
         }
 
-        if spec.cpu.is_none() && spec.mem.is_none() {
+        if spec.cpu.is_none()
+            && spec.mem.is_none()
+            && spec.read_bytes.is_none()
+            && spec.write_bytes.is_none()
+        {
             return Err(syn::Error::new(
                 proc_macro2::Span::call_site(),
-                "must provide at least one of `cpu` or `mem` limits",
+                "must provide at least one limit",
             ));
         }
 
@@ -379,6 +389,8 @@ fn generate_budget_assert(spec: BudgetSpec, item: TokenStream) -> TokenStream {
         .env_ident
         .unwrap_or_else(|| proc_macro2::Ident::new("env", proc_macro2::Span::call_site()));
 
+    let needs_resources = spec.read_bytes.is_some() || spec.write_bytes.is_some();
+
     let mut asserts = Vec::new();
 
     if let Some(limit) = spec.cpu {
@@ -415,6 +427,41 @@ fn generate_budget_assert(spec: BudgetSpec, item: TokenStream) -> TokenStream {
         });
     }
 
+    if let Some(limit) = spec.read_bytes {
+        let limit_expr = generate_limit_expr(&limit, "budget_read_bytes_lt");
+        let cost_ident = proc_macro2::Ident::new("read_bytes_cost", proc_macro2::Span::call_site());
+        let cost_expr = quote! { resources.read_bytes as u64 };
+        let assert_msg = "Read bytes cost {} exceeded limit {} - local estimate, real network cost may differ significantly in either direction";
+        asserts.push(quote! {
+            let #cost_ident = #cost_expr;
+            let limit_u64: u64 = #limit_expr;
+            assert!(
+                #cost_ident < limit_u64,
+                #assert_msg,
+                #cost_ident,
+                limit_u64
+            );
+        });
+    }
+
+    if let Some(limit) = spec.write_bytes {
+        let limit_expr = generate_limit_expr(&limit, "budget_write_bytes_lt");
+        let cost_ident =
+            proc_macro2::Ident::new("write_bytes_cost", proc_macro2::Span::call_site());
+        let cost_expr = quote! { resources.write_bytes as u64 };
+        let assert_msg = "Write bytes cost {} exceeded limit {} - local estimate, real network cost may differ significantly in either direction";
+        asserts.push(quote! {
+            let #cost_ident = #cost_expr;
+            let limit_u64: u64 = #limit_expr;
+            assert!(
+                #cost_ident < limit_u64,
+                #assert_msg,
+                #cost_ident,
+                limit_u64
+            );
+        });
+    }
+
     let prelude = quote! {
         #[allow(unused_variables)]
         let budget_env_resolve = |var: &str| -> Option<String> {
@@ -426,10 +473,20 @@ fn generate_budget_assert(spec: BudgetSpec, item: TokenStream) -> TokenStream {
     // statement, so an early `return` cannot skip it. It stays inside the body's
     // scope so each limit still resolves against the body's own bindings — tests
     // that shadow `budget_env_resolve` rely on that.
-    let assertion = quote! {
-        {
-            let budget = #env_ident.cost_estimate().budget();
-            #(#asserts)*
+    let assertion = if needs_resources {
+        quote! {
+            {
+                let budget = #env_ident.cost_estimate().budget();
+                let resources = #env_ident.cost_estimate().resources();
+                #(#asserts)*
+            }
+        }
+    } else {
+        quote! {
+            {
+                let budget = #env_ident.cost_estimate().budget();
+                #(#asserts)*
+            }
         }
     };
 
@@ -510,6 +567,78 @@ pub fn budget_cpu_lt(attr: TokenStream, item: TokenStream) -> TokenStream {
         BudgetSpec {
             cpu: Some(limit),
             mem: None,
+            read_bytes: None,
+            write_bytes: None,
+            env_ident: None,
+        },
+        item,
+    )
+}
+
+/// Asserts that the ledger read bytes used by `env` are strictly less than a specified limit.
+///
+/// Must be placed on a test function that contains a local `env` variable (a `soroban_sdk::Env`).
+/// The macro injects an assertion check that measures
+/// `env.cost_estimate().resources().read_bytes` on every path that leaves the test
+/// function, so bodies ending in a tail expression (`fn test() -> Result<(), Error>`)
+/// and bodies with early `return`s are both supported.
+///
+/// # Local Estimates vs Network Costs
+///
+/// This attribute checks a **local estimate** of read byte consumption.
+/// Local estimates (such as raw Rust test execution or unoptimized local WASM builds) can
+/// strictly underestimate or differ significantly from real Testnet or Futurenet costs.
+///
+/// Use local assertions as a fast local regression gate. For true network ground truth, use
+/// `cargo budget-report`.
+///
+/// # Usage Examples
+///
+/// ## Static Limit
+///
+/// ```rust,ignore
+/// use budget_macros::budget_read_bytes_lt;
+/// use soroban_sdk::Env;
+///
+/// #[test]
+/// #[budget_read_bytes_lt(25_000)]
+/// fn test_read_bytes_budget() {
+///     let env = Env::default();
+///     // ... setup contract client and invoke contract function ...
+/// }
+/// ```
+///
+/// ## Dynamic Limit via Environment Variable (`env = "VAR_NAME"`)
+///
+/// ```rust,ignore
+/// use budget_macros::budget_read_bytes_lt;
+/// use soroban_sdk::Env;
+///
+/// #[test]
+/// #[budget_read_bytes_lt(env = "MAX_READ_BYTES")]
+/// fn test_read_bytes_budget_dynamic() {
+///     let env = Env::default();
+///     // ... setup contract client and invoke contract function ...
+/// }
+/// ```
+///
+/// When using `env = "VAR_NAME"`:
+/// - If the environment variable is **unset**, the limit defaults to `u64::MAX` ("no limit"),
+///   allowing the test assertion to pass unconditionally.
+/// - If the environment variable is set to a string that **cannot be parsed as a `u64`**,
+///   the test panics at runtime with an explicit error naming the variable and invalid value.
+#[proc_macro_attribute]
+pub fn budget_read_bytes_lt(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let limit = match syn::parse2::<BudgetLimit>(attr.into()) {
+        Ok(l) => l,
+        Err(e) => return TokenStream::from(e.to_compile_error()),
+    };
+    generate_budget_assert(
+        BudgetSpec {
+            cpu: None,
+            mem: None,
+            read_bytes: Some(limit),
+            write_bytes: None,
             env_ident: None,
         },
         item,
@@ -572,71 +701,74 @@ pub fn budget_cpu_lt(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - If the environment variable is set to a string that **cannot be parsed as a `u64`**,
 ///   the test panics at runtime with an explicit error naming the variable and invalid value.
 ///
-/// Asserts that the ledger write bytes used by `env` are less than N.
+/// Asserts that the ledger write bytes used by `env` are strictly less than a specified limit.
 ///
-/// Write bytes represent the total bytes written to ledger storage during
-/// contract execution. This macro measures the local `memory_bytes_cost` as a
-/// proxy, which correlates with storage serialization overhead even though the
-/// exact on-network write-bytes figure is only available via RPC simulation.
-/// Must be placed on a test function that has a local `env` variable.
+/// Must be placed on a test function that contains a local `env` variable (a `soroban_sdk::Env`).
+/// The macro injects an assertion check that measures
+/// `env.cost_estimate().resources().write_bytes` on every path that leaves the test
+/// function, so bodies ending in a tail expression (`fn test() -> Result<(), Error>`)
+/// and bodies with early `return`s are both supported.
+///
+/// # Local Estimates vs Network Costs
+///
+/// This attribute checks a **local estimate** of write byte consumption.
+/// Local estimates (such as raw Rust test execution or unoptimized local WASM builds) can
+/// strictly underestimate or differ significantly from real Testnet or Futurenet costs.
+///
+/// Use local assertions as a fast local regression gate. For true network ground truth, use
+/// `cargo budget-report`.
+///
+/// # Usage Examples
+///
+/// ## Static Limit
+///
+/// ```rust,ignore
+/// use budget_macros::budget_write_bytes_lt;
+/// use soroban_sdk::Env;
+///
+/// #[test]
+/// #[budget_write_bytes_lt(5_000_000)]
+/// fn test_write_bytes_budget() {
+///     let env = Env::default();
+///     // ... setup contract client and invoke contract function ...
+/// }
+/// ```
+///
+/// ## Dynamic Limit via Environment Variable (`env = "VAR_NAME"`)
+///
+/// ```rust,ignore
+/// use budget_macros::budget_write_bytes_lt;
+/// use soroban_sdk::Env;
+///
+/// #[test]
+/// #[budget_write_bytes_lt(env = "MAX_WRITE_BYTES")]
+/// fn test_write_bytes_budget_dynamic() {
+///     let env = Env::default();
+///     // ... setup contract client and invoke contract function ...
+/// }
+/// ```
+///
+/// When using `env = "VAR_NAME"`:
+/// - If the environment variable is **unset**, the limit defaults to `u64::MAX` ("no limit"),
+///   allowing the test assertion to pass unconditionally.
+/// - If the environment variable is set to a string that **cannot be parsed as a `u64`**,
+///   the test panics at runtime with an explicit error naming the variable and invalid value.
 #[proc_macro_attribute]
 pub fn budget_write_bytes_lt(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let limit = match syn::parse::<BudgetLimit>(attr) {
+    let limit = match syn::parse2::<BudgetLimit>(attr.into()) {
         Ok(l) => l,
         Err(e) => return TokenStream::from(e.to_compile_error()),
     };
-    let mut input_fn = match syn::parse::<ItemFn>(item) {
-        Ok(f) => f,
-        Err(e) => return TokenStream::from(e.to_compile_error()),
-    };
-
-    let limit_expr = match limit {
-        BudgetLimit::Int(n) => quote! { #n },
-        BudgetLimit::EnvVar(var) => quote! {
-            std::env::var(#var)
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(u64::MAX)
+    generate_budget_assert(
+        BudgetSpec {
+            cpu: None,
+            mem: None,
+            read_bytes: None,
+            write_bytes: Some(limit),
+            env_ident: None,
         },
-        BudgetLimit::Config(key) => quote! {
-            std::fs::read_to_string(std::path::Path::new("budget.json"))
-                .ok()
-                .map(|content| {
-                    parse_config_value(&content, #key).unwrap_or_else(|| {
-                        panic!(
-                            "budget_write_bytes_lt: key '{}' not found or invalid in budget.json",
-                            #key,
-                        )
-                    })
-                })
-                .unwrap_or(u64::MAX)
-        },
-    };
-
-    let env_ident = proc_macro2::Ident::new("env", proc_macro2::Span::call_site());
-
-    // Same exit-path instrumentation as the other budget macros.
-    let assertion = quote! {
-        {
-            let budget = #env_ident.cost_estimate().budget();
-            let write_bytes_cost = budget.memory_bytes_cost();
-            let limit_u64: u64 = #limit_expr;
-            assert!(
-                write_bytes_cost < limit_u64,
-                "Write bytes cost (memory proxy) {} exceeded limit {} - local estimate, underestimates real network cost",
-                write_bytes_cost,
-                limit_u64
-            );
-        }
-    };
-
-    if let Some(tokens) = instrument_exit_paths(&mut input_fn, quote! {}, assertion) {
-        return tokens;
-    }
-
-    TokenStream::from(quote! {
-        #input_fn
-    })
+        item,
+    )
 }
 /// Asserts that the memory bytes used by `env` are strictly less than a specified limit.
 ///
@@ -706,16 +838,19 @@ pub fn budget_mem_lt(attr: TokenStream, item: TokenStream) -> TokenStream {
         BudgetSpec {
             cpu: None,
             mem: Some(limit),
+            read_bytes: None,
+            write_bytes: None,
             env_ident: None,
         },
         item,
     )
 }
 
-/// Asserts that the CPU and/or memory bytes used by `env` are less than specified limits.
+/// Asserts that the CPU instructions, memory bytes, read bytes, and/or write bytes
+/// used by `env` are less than specified limits.
 /// Must be placed on a test function that has a local `env` variable.
 ///
-/// Limits can be specified as `cpu = N` and `mem = M`.
+/// Limits can be specified as `cpu = N`, `mem = M`, `read_bytes = N`, and/or `write_bytes = N`.
 ///
 /// This checks a *local* estimate. Real network cost can differ from it
 /// significantly in either direction depending on the build profile — see

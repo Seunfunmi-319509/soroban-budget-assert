@@ -1,6 +1,6 @@
 //! `#[budget_write_bytes_lt]` is instrumented by the same shared helper, so it
 //! supports the same body shapes: unit, trailing expression, and early return.
-//! It reports `memory_bytes_cost()` as its write-bytes proxy.
+//! It reports `resources().write_bytes` as its write-bytes figure.
 
 #[path = "../support/mock_env.rs"]
 mod mock_env;
@@ -13,18 +13,18 @@ struct TestError;
 
 #[budget_write_bytes_lt(4_096)]
 fn unit_body() {
-    let env = Env::new(0, 2_048);
+    let env = Env::new(0, 2_048).with_read_write(0, 2_048);
 }
 
 #[budget_write_bytes_lt(4_096)]
 fn result_body() -> Result<u64, TestError> {
-    let env = Env::new(0, 2_048);
-    Ok(env.cost_estimate().budget().memory_bytes_cost())
+    let env = Env::new(0, 2_048).with_read_write(0, 2_048);
+    Ok(env.cost_estimate().resources().write_bytes as u64)
 }
 
 #[budget_write_bytes_lt(4_096)]
 fn early_return_body(exit_early: bool) -> Result<(), TestError> {
-    let env = Env::new(0, 8_192);
+    let env = Env::new(0, 8_192).with_read_write(0, 8_192);
     if exit_early {
         return Ok(());
     }
@@ -38,7 +38,7 @@ fn main() {
     let message =
         budget_panic(|| early_return_body(true)).expect("the budget assertion should have failed");
     assert!(
-        message.contains("Write bytes cost (memory proxy) 8192 exceeded limit 4096"),
+        message.contains("Write bytes cost 8192 exceeded limit 4096"),
         "unexpected panic message: {message}"
     );
 }
