@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
-
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -594,8 +593,7 @@ fn simulate_function(
     let b64_xdr = String::from_utf8_lossy(&invoke_output.stdout)
         .trim()
         .to_string();
-    let rpc_url = soroban_rpc_url(network)
-        .unwrap_or("https://soroban-testnet.stellar.org:443");
+    let rpc_url = soroban_rpc_url(network).unwrap_or("https://soroban-testnet.stellar.org:443");
     let rpc_resp = simulate_transaction_rpc(&b64_xdr, rpc_url)?;
 
     if let Some(error) = rpc_resp.get("error") {
@@ -1336,10 +1334,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+mod module_12;
 mod module_2;
 mod module_3;
 mod module_4;
-mod module_12;
 pub mod validate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1376,9 +1374,9 @@ mod module_32;
 #[cfg(test)]
 mod module_8;
 
+mod module_18;
 #[cfg(test)]
 mod module_27;
-mod module_18;
 
 #[cfg(test)]
 mod module_19;

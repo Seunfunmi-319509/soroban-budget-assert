@@ -1,8 +1,12 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
+use proc_macro2::Span;
 use quote::{quote, ToTokens};
-use syn::{parse::Parse, parse::ParseStream, Expr, Ident, ItemFn, LitInt, LitStr, Token};
+use syn::{
+    parse::Parse, parse::ParseStream, parse_quote, Attribute, Expr, Ident, ItemFn, LitFloat,
+    LitInt, LitStr, Token,
+};
 
 /// The resolved budget limit supplied by the user to a `budget_cpu_lt` or
 /// `budget_mem_lt` attribute macro.
@@ -39,6 +43,11 @@ enum BudgetLimit {
     EnvVar(String),
     /// A JSON key in `budget.json` whose value will be used as the limit.
     Config(String),
+    /// A path to a `.env` file and the key to read from it.
+    EnvFile {
+        path: proc_macro2::TokenStream,
+        var_name: String,
+    },
 }
 
 #[derive(Default)]
@@ -48,6 +57,52 @@ struct BudgetSpec {
     read_bytes: Option<BudgetLimit>,
     write_bytes: Option<BudgetLimit>,
     env_ident: Option<Ident>,
+}
+
+impl Parse for BudgetSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut spec = BudgetSpec::default();
+
+        while !input.is_empty() {
+            let ident: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            let ident_str = ident.to_string();
+
+            if ident_str == "env_ident" {
+                spec.env_ident = Some(input.parse()?);
+            } else if ident_str == "cpu" {
+                spec.cpu = Some(input.parse()?);
+            } else if ident_str == "mem" {
+                spec.mem = Some(input.parse()?);
+            } else if ident_str == "read_bytes" {
+                spec.read_bytes = Some(input.parse()?);
+            } else if ident_str == "write_bytes" {
+                spec.write_bytes = Some(input.parse()?);
+            } else {
+                return Err(syn::Error::new(
+                    ident.span(),
+                    format!("unknown property: {}", ident_str),
+                ));
+            }
+
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        if spec.cpu.is_none()
+            && spec.mem.is_none()
+            && spec.read_bytes.is_none()
+            && spec.write_bytes.is_none()
+        {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "must provide at least one limit",
+            ));
+        }
+
+        Ok(spec)
+    }
 }
 
 /// Parses a budget limit from the attribute macro's token stream.
@@ -176,90 +231,6 @@ impl Parse for BudgetLimit {
                 "expected an integer literal, `env = \"VAR\"`, `env_file = \"PATH\"` + `env = \"VAR\"`, or `config = \"KEY\"`",
             )),
         }
-    }
-}
-
-/// Generates the final token stream for a budget assertion attribute macro.
-///
-/// This is the shared code-generation path behind both [`budget_cpu_lt`] and
-/// [`budget_mem_lt`]. It performs the following steps:
-///
-/// 1. **Parse the attribute** — attempts to parse the token stream as a
-///    [`BudgetLimit`]. On failure, emits a compile error at the call site.
-/// 2. **Parse the item** — attempts to parse the annotated item as a function
-///    ([`syn::ItemFn`]). On failure, emits a compile error.
-/// 3. **Generate limit-resolution code** — depending on the variant of
-///    [`BudgetLimit`] (`Int`, `EnvVar`, or `Config`), emits the appropriate
-///    runtime expression that produces a `u64` limit. The `Config` branch
-///    includes a `#[allow(unused_parens)]` suppression because the generated
-///    `match` arm wraps the resolution logic in an expression block that
-///    needs to return a `u64` through a parenthesised path.
-/// 4. **Generate the cost-measurement code** — embeds a call to
-///    `env.cost_estimate().budget().cpu_instruction_cost()` (for CPU) or
-///    `.memory_bytes_cost()` (for memory) and an `assert!` that the measured
-///    value is strictly less than the limit.
-/// 5. **Replace the function body** — wraps the original statements in a new
-///    block that includes the limit-resolution helpers, the original
-///    statements, the cost measurement, and the assertion check.
-///
-/// # Parameters
-///
-/// * `attr` — the token stream of the attribute arguments (e.g. `500_000` or
-///   `env = "VAR"`).
-/// * `item` — the token stream of the annotated function.
-/// * `metric` — which Soroban budget metric to assert against.
-///
-/// # Returns
-///
-/// A [`proc_macro::TokenStream`] containing the modified function with the
-/// budget assertion appended.
-fn generate_budget_assert(
-    attr: TokenStream,
-    item: TokenStream,
-    metric: BudgetMetric,
-) -> TokenStream {
-    let attr_tokens: proc_macro2::TokenStream = attr.into();
-    let item_tokens: proc_macro2::TokenStream = item.into();
-
-        while !input.is_empty() {
-            let ident: Ident = input.parse()?;
-            input.parse::<Token![=]>()?;
-            let ident_str = ident.to_string();
-
-            if ident_str == "env_ident" {
-                spec.env_ident = Some(input.parse()?);
-            } else if ident_str == "cpu" {
-                spec.cpu = Some(input.parse()?);
-            } else if ident_str == "mem" {
-                spec.mem = Some(input.parse()?);
-            } else if ident_str == "read_bytes" {
-                spec.read_bytes = Some(input.parse()?);
-            } else if ident_str == "write_bytes" {
-                spec.write_bytes = Some(input.parse()?);
-            } else {
-                return Err(syn::Error::new(
-                    ident.span(),
-                    format!("unknown property: {}", ident_str),
-                ));
-            }
-
-            if !input.is_empty() {
-                input.parse::<Token![,]>()?;
-            }
-        }
-
-        if spec.cpu.is_none()
-            && spec.mem.is_none()
-            && spec.read_bytes.is_none()
-            && spec.write_bytes.is_none()
-        {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "must provide at least one limit",
-            ));
-        }
-
-        Ok(spec)
     }
 }
 
@@ -449,6 +420,14 @@ fn generate_budget_assert(spec: BudgetSpec, item: TokenStream) -> TokenStream {
         }
     };
 
+    let new_block = quote! {
+        {
+            #prelude
+            #(#stmts)*
+            #assertion
+        }
+    };
+
     *input_fn.block = match syn::parse2(new_block) {
         Ok(block) => block,
         Err(e) => return TokenStream::from(e.into_compile_error()),
@@ -632,54 +611,6 @@ pub fn budget_read_bytes_lt(attr: TokenStream, item: TokenStream) -> TokenStream
         item,
     )
 }
-
-/// Asserts that the ledger write bytes used by `env` are less than N.
-///
-/// Write bytes represent the total bytes written to ledger storage during
-/// contract execution. This macro measures the local `memory_bytes_cost` as a
-/// proxy, which correlates with storage serialization overhead even though the
-/// exact on-network write-bytes figure is only available via RPC simulation.
-/// Must be placed on a test function that has a local `env` variable.
-#[proc_macro_attribute]
-pub fn budget_write_bytes_lt(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let limit = match syn::parse::<BudgetLimit>(attr) {
-        Ok(l) => l,
-        Err(e) => return TokenStream::from(e.to_compile_error()),
-    };
-    let mut input_fn = match syn::parse::<ItemFn>(item) {
-        Ok(f) => f,
-        Err(e) => return TokenStream::from(e.to_compile_error()),
-    };
-
-    let stmts = &input_fn.block.stmts;
-
-    let limit_expr = generate_limit_expr(&limit, "budget_write_bytes_lt");
-
-    let env_ident = proc_macro2::Ident::new("env", proc_macro2::Span::call_site());
-
-    let new_block = quote! {
-        {
-            #(#stmts)*
-
-            let budget = #env_ident.cost_estimate().budget();
-            let write_bytes_cost = budget.memory_bytes_cost();
-            let limit_u64: u64 = #limit_expr;
-            assert!(
-                write_bytes_cost < limit_u64,
-                "Write bytes cost (memory proxy) {} exceeded limit {} - local estimate, underestimates real network cost",
-                write_bytes_cost,
-                limit_u64
-            );
-        }
-    };
-
-    *input_fn.block = syn::parse2(new_block).unwrap();
-
-    TokenStream::from(quote! {
-        #input_fn
-    })
-}
-
 /// Asserts that the memory bytes used by `env` are strictly less than a specified limit.
 ///
 /// Must be placed on a test function that contains a local `env` variable (a `soroban_sdk::Env`).
@@ -934,9 +865,7 @@ impl Parse for GrowthModel {
             "quadratic" => Ok(GrowthModel::Quadratic),
             other => Err(syn::Error::new(
                 ident.span(),
-                format!(
-                    "unknown growth model `{other}`, expected `linear` or `quadratic`"
-                ),
+                format!("unknown growth model `{other}`, expected `linear` or `quadratic`"),
             )),
         }
     }

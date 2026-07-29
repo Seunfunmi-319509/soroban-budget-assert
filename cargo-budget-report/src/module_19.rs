@@ -190,10 +190,7 @@ mod windows_compatibility_tests {
         // TOML requires double-quotes for strings; single quotes are
         // treated as literal single quotes.
         let result = toml::from_str::<BudgetToml>("network = 'testnet'\n");
-        assert!(
-            result.is_err(),
-            "single-quoted strings are not valid TOML"
-        );
+        assert!(result.is_err(), "single-quoted strings are not valid TOML");
     }
 
     #[test]
@@ -251,10 +248,7 @@ args = ["--x"]
 
     #[test]
     fn formatter_exact_boundaries_in_bytes() {
-        assert_eq!(
-            format_with_commas_and_units(1_000, "Read Bytes"),
-            "1,000 B"
-        );
+        assert_eq!(format_with_commas_and_units(1_000, "Read Bytes"), "1,000 B");
         assert_eq!(
             format_with_commas_and_units(10_000, "Write Bytes"),
             "10,000 B"
@@ -268,7 +262,10 @@ args = ["--x"]
     #[test]
     fn formatter_metric_name_contains_bytes_gets_b_suffix() {
         // Any metric containing "Bytes" gets the "B" suffix.
-        assert_eq!(format_with_commas_and_units(42, "CPU Instructions Bytes"), "42 B");
+        assert_eq!(
+            format_with_commas_and_units(42, "CPU Instructions Bytes"),
+            "42 B"
+        );
     }
 
     #[test]
@@ -346,10 +343,7 @@ args = ["--x"]
             write_limit: None,
             tolerance: None,
         };
-        assert_eq!(
-            limit_for_metric(&config, "CPU Instructions"),
-            Some(1234567)
-        );
+        assert_eq!(limit_for_metric(&config, "CPU Instructions"), Some(1234567));
     }
 
     // ── emit_check_failure_entries regression boundary ────────────────
@@ -412,8 +406,8 @@ args = ["--x"]
     #[test]
     fn budget_toml_template_can_be_deserialized() {
         // The template itself must be valid TOML that BudgetToml can parse.
-        let config: BudgetToml = toml::from_str(BUDGET_TOML_TEMPLATE)
-            .expect("BUDGET_TOML_TEMPLATE must be valid TOML");
+        let config: BudgetToml =
+            toml::from_str(BUDGET_TOML_TEMPLATE).expect("BUDGET_TOML_TEMPLATE must be valid TOML");
         assert_eq!(config.network.as_deref(), Some("testnet"));
         assert_eq!(config.source.as_deref(), Some("alice"));
         assert!(config.functions.contains_key("do_expensive_work"));
@@ -459,16 +453,14 @@ args = ["--x"]
 
     #[test]
     fn resolve_tolerance_zero_tolerance() {
-        let t = crate::compare::parse_tolerance("0.0")
-            .expect("zero tolerance should parse");
+        let t = crate::compare::parse_tolerance("0.0").expect("zero tolerance should parse");
         // Zero tolerance means any increase is a regression.
         assert!((t.value - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn resolve_tolerance_one_hundred_percent() {
-        let t = crate::compare::parse_tolerance("1.0")
-            .expect("1.0 tolerance should parse");
+        let t = crate::compare::parse_tolerance("1.0").expect("1.0 tolerance should parse");
         assert!((t.value - 1.0).abs() < f64::EPSILON);
     }
 
@@ -479,7 +471,8 @@ args = ["--x"]
             .to_string();
         assert!(
             err.contains("non-negative"),
-            "negative tolerance should be rejected, got: {}", err
+            "negative tolerance should be rejected, got: {}",
+            err
         );
     }
 

@@ -593,6 +593,7 @@ fn test_storage_read_wasm_local() {
     let read_bytes = env.cost_estimate().resources().read_bytes;
     let cpu = budget.cpu_instruction_cost();
     let mem = budget.memory_bytes_cost();
+}
 
 /// Asserts that the write-bytes proxy stays below a generous threshold so
 /// normal write-heavy usage passes in CI.
