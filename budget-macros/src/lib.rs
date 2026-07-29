@@ -39,6 +39,15 @@ enum BudgetLimit {
     EnvVar(String),
     /// A JSON key in `budget.json` whose value will be used as the limit.
     Config(String),
+    /// A limit read from a `.env`-shaped file at the given path, keyed by the
+    /// given variable name.
+    EnvFile {
+        /// Path to the `.env` file (as a token stream so callers can pass
+        /// either a string literal or a const identifier).
+        path: proc_macro2::TokenStream,
+        /// The variable name (KEY) to look up inside the file.
+        var_name: String,
+    },
 }
 
 /// The cost metric that a budget macro asserts against.
@@ -186,82 +195,6 @@ impl Parse for BudgetLimit {
     }
 }
 
-/// Generates the final token stream for a budget assertion attribute macro.
-///
-/// This is the shared code-generation path behind both [`budget_cpu_lt`] and
-/// [`budget_mem_lt`]. It performs the following steps:
-///
-/// 1. **Parse the attribute** — attempts to parse the token stream as a
-///    [`BudgetLimit`]. On failure, emits a compile error at the call site.
-/// 2. **Parse the item** — attempts to parse the annotated item as a function
-///    ([`syn::ItemFn`]). On failure, emits a compile error.
-/// 3. **Generate limit-resolution code** — depending on the variant of
-///    [`BudgetLimit`] (`Int`, `EnvVar`, or `Config`), emits the appropriate
-///    runtime expression that produces a `u64` limit. The `Config` branch
-///    includes a `#[allow(unused_parens)]` suppression because the generated
-///    `match` arm wraps the resolution logic in an expression block that
-///    needs to return a `u64` through a parenthesised path.
-/// 4. **Generate the cost-measurement code** — embeds a call to
-///    `env.cost_estimate().budget().cpu_instruction_cost()` (for CPU) or
-///    `.memory_bytes_cost()` (for memory) and an `assert!` that the measured
-///    value is strictly less than the limit.
-/// 5. **Replace the function body** — wraps the original statements in a new
-///    block that includes the limit-resolution helpers, the original
-///    statements, the cost measurement, and the assertion check.
-///
-/// # Parameters
-///
-/// * `attr` — the token stream of the attribute arguments (e.g. `500_000` or
-///   `env = "VAR"`).
-/// * `item` — the token stream of the annotated function.
-/// * `metric` — which Soroban budget metric to assert against.
-///
-/// # Returns
-///
-/// A [`proc_macro::TokenStream`] containing the modified function with the
-/// budget assertion appended.
-fn generate_budget_assert(
-    attr: TokenStream,
-    item: TokenStream,
-    metric: BudgetMetric,
-) -> TokenStream {
-    let attr_tokens: proc_macro2::TokenStream = attr.into();
-    let item_tokens: proc_macro2::TokenStream = item.into();
-
-        while !input.is_empty() {
-            let ident: Ident = input.parse()?;
-            input.parse::<Token![=]>()?;
-            let ident_str = ident.to_string();
-
-            if ident_str == "env_ident" {
-                spec.env_ident = Some(input.parse()?);
-            } else if ident_str == "cpu" {
-                spec.cpu = Some(input.parse()?);
-            } else if ident_str == "mem" {
-                spec.mem = Some(input.parse()?);
-            } else {
-                return Err(syn::Error::new(
-                    ident.span(),
-                    format!("unknown property: {}", ident_str),
-                ));
-            }
-
-            if !input.is_empty() {
-                input.parse::<Token![,]>()?;
-            }
-        }
-
-        if spec.cpu.is_none() && spec.mem.is_none() {
-            return Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "must provide at least one of `cpu` or `mem` limits",
-            ));
-        }
-
-        Ok(spec)
-    }
-}
-
 fn generate_limit_expr(limit: &BudgetLimit, metric_label: &str) -> proc_macro2::TokenStream {
     match limit {
         BudgetLimit::Int(n) => quote! { #n },
@@ -333,6 +266,58 @@ fn generate_limit_expr(limit: &BudgetLimit, metric_label: &str) -> proc_macro2::
                 }
             }
         }
+    }
+}
+
+/// Combined budget specification for the `#[budget_lt(…)]` macro.
+struct BudgetSpec {
+    /// Optional environment identifier variable name.
+    env_ident: Option<Ident>,
+    /// Optional CPU instruction limit.
+    cpu: Option<BudgetLimit>,
+    /// Optional memory bytes limit.
+    mem: Option<BudgetLimit>,
+}
+
+impl Parse for BudgetSpec {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut spec = BudgetSpec {
+            env_ident: None,
+            cpu: None,
+            mem: None,
+        };
+
+        while !input.is_empty() {
+            let ident: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            let ident_str = ident.to_string();
+
+            if ident_str == "env_ident" {
+                spec.env_ident = Some(input.parse()?);
+            } else if ident_str == "cpu" {
+                spec.cpu = Some(input.parse()?);
+            } else if ident_str == "mem" {
+                spec.mem = Some(input.parse()?);
+            } else {
+                return Err(syn::Error::new(
+                    ident.span(),
+                    format!("unknown property: {}", ident_str),
+                ));
+            }
+
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        if spec.cpu.is_none() && spec.mem.is_none() {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "must provide at least one of `cpu` or `mem` limits",
+            ));
+        }
+
+        Ok(spec)
     }
 }
 
@@ -740,9 +725,7 @@ impl Parse for GrowthModel {
             "quadratic" => Ok(GrowthModel::Quadratic),
             other => Err(syn::Error::new(
                 ident.span(),
-                format!(
-                    "unknown growth model `{other}`, expected `linear` or `quadratic`"
-                ),
+                format!("unknown growth model `{other}`, expected `linear` or `quadratic`"),
             )),
         }
     }
