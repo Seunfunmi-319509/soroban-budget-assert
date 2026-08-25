@@ -1047,10 +1047,7 @@ fn run_preflight_checks(quiet: bool) -> Result<()> {
         }
         Ok(output) => {
             let installed = String::from_utf8_lossy(&output.stdout);
-            if installed
-                .lines()
-                .any(|line| line.trim() == WASM_TARGET)
-            {
+            if installed.lines().any(|line| line.trim() == WASM_TARGET) {
                 if !quiet {
                     eprintln!("found");
                 }
