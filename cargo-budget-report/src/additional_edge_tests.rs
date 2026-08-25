@@ -12,6 +12,8 @@
 mod off_by_one_and_zero_length_tests {
     use crate::*;
 
+    // ── evaluate_check additional boundary tests ───────────────────────
+
     #[test]
     fn evaluate_check_value_one_limit_one_passes() {
         let (limit, pass) = evaluate_check(1, Some(1));
@@ -40,6 +42,8 @@ mod off_by_one_and_zero_length_tests {
         assert_eq!(pass, Some(false));
     }
 
+    // ── limit_for_metric additional edge cases ─────────────────────────
+
     #[test]
     fn limit_for_metric_metric_exactly_bytes() {
         let config = FunctionConfig {
@@ -49,6 +53,7 @@ mod off_by_one_and_zero_length_tests {
             write_limit: Some(500),
             tolerance: None,
         };
+        // "Bytes" (exact match, no prefix) does not match any known metric.
         assert_eq!(limit_for_metric(&config, "Bytes"), None);
     }
 
@@ -76,6 +81,8 @@ mod off_by_one_and_zero_length_tests {
         let config = FunctionConfig::default();
         assert_eq!(limit_for_metric(&config, "CPU\0 Instructions"), None);
     }
+
+    // ── format_with_commas_and_units comma-boundary tests ──────────────
 
     #[test]
     fn formatter_ten_thousand_no_comma() {
@@ -127,6 +134,9 @@ mod off_by_one_and_zero_length_tests {
 
     #[test]
     fn formatter_metric_contains_bytes_prefix_not_suffix() {
+        // "Bytes" appears in the metric name but not as a separate word.
+        // The function uses `contains("Bytes")`, so this should still
+        // get the byte suffix.
         assert_eq!(format_with_commas_and_units(100, "MyBytesMetric"), "100 B");
     }
 
@@ -137,8 +147,11 @@ mod off_by_one_and_zero_length_tests {
 
     #[test]
     fn formatter_metric_case_sensitive_no_match() {
+        // "bytes" (lowercase) should NOT match due to case-sensitive contains.
         assert_eq!(format_with_commas_and_units(100, "read bytes"), "100 inst.");
     }
+
+    // ── emit_check_failure_entries additional edge cases ───────────────
 
     #[test]
     fn emit_check_failure_entries_long_package_and_function_names() {
@@ -148,9 +161,9 @@ mod off_by_one_and_zero_length_tests {
         let config = FunctionConfig::default();
         emit_check_failure_entries(&mut reports, &long_pkg, &long_fn, &config);
         assert_eq!(reports.len(), 3);
-        for report in &reports {
-            assert_eq!(report.package.len(), 256);
-            assert_eq!(report.function.len(), 256);
+        for r in &reports {
+            assert_eq!(r.package.len(), 256);
+            assert_eq!(r.function.len(), 256);
         }
     }
 
@@ -160,20 +173,22 @@ mod off_by_one_and_zero_length_tests {
         let config = FunctionConfig::default();
         emit_check_failure_entries(&mut reports, "päckäge", "fünctiön", &config);
         assert_eq!(reports.len(), 3);
-        for report in &reports {
-            assert_eq!(report.package, "päckäge");
-            assert_eq!(report.function, "fünctiön");
+        for r in &reports {
+            assert_eq!(r.package, "päckäge");
+            assert_eq!(r.function, "fünctiön");
         }
     }
+
+    // ── build_invoke_args additional zero-length edge cases ────────────
 
     #[test]
     fn build_invoke_args_all_empty_strings() {
         let args = build_invoke_args("", "", "", "", &[]);
         assert_eq!(args.len(), 11);
-        assert_eq!(args[3], "");
-        assert_eq!(args[5], "");
-        assert_eq!(args[7], "");
-        assert_eq!(args[10], "");
+        assert_eq!(args[3], ""); // contract id
+        assert_eq!(args[5], ""); // source
+        assert_eq!(args[7], ""); // network
+        assert_eq!(args[10], ""); // function name
     }
 
     #[test]
@@ -202,12 +217,16 @@ mod off_by_one_and_zero_length_tests {
         assert_eq!(args.last(), Some(&"do_work_123!".to_string()));
     }
 
+    // ── build_rpc_payload additional edge cases ────────────────────────
+
     #[test]
     fn build_rpc_payload_unicode_xdr() {
         let payload = build_rpc_payload("héllo_wörld");
         assert_eq!(payload["params"]["transaction"], "héllo_wörld");
         assert_eq!(payload["jsonrpc"], "2.0");
     }
+
+    // ── TransactionData::parse_json additional edge cases ──────────────
 
     #[test]
     fn transaction_data_parse_extra_unknown_fields() {
@@ -272,6 +291,8 @@ mod off_by_one_and_zero_length_tests {
         assert!(result.is_err());
     }
 
+    // ── load_budget_toml additional edge cases ─────────────────────────
+
     #[test]
     fn load_budget_toml_only_foreign_section_returns_default() {
         let tmp = tempfile::NamedTempFile::new().expect("failed to create temp file");
@@ -328,47 +349,45 @@ cpu_limit = 5000000
         assert!(func.write_limit.is_none());
     }
 
+    // ── CSV output additional edge cases ───────────────────────────────
+
     fn reports_to_csv(reports: &[CostReport], check: bool) -> String {
-        let mut writer = csv::Writer::from_writer(vec![]);
+        let mut wtr = csv::Writer::from_writer(vec![]);
         if check {
-            writer
-                .write_record(["package", "function", "metric", "value", "limit", "pass"])
+            wtr.write_record(["package", "function", "metric", "value", "limit", "pass"])
                 .unwrap();
-            for report in reports {
-                let value = report.value.map(|value| value.to_string()).unwrap_or_default();
-                let limit = report.limit.map(|limit| limit.to_string()).unwrap_or_default();
-                let pass = report.pass.map(|pass| pass.to_string()).unwrap_or_default();
-                writer
-                    .write_record([
-                        report.package.as_str(),
-                        report.function.as_str(),
-                        report.metric,
-                        value.as_str(),
-                        limit.as_str(),
-                        pass.as_str(),
-                    ])
-                    .unwrap();
+            for r in reports {
+                let value_str = r.value.map(|v| v.to_string()).unwrap_or_default();
+                let limit_str = r.limit.map(|l| l.to_string()).unwrap_or_default();
+                let pass_str = r.pass.map(|p| p.to_string()).unwrap_or_default();
+                wtr.write_record([
+                    r.package.as_str(),
+                    r.function.as_str(),
+                    r.metric,
+                    value_str.as_str(),
+                    limit_str.as_str(),
+                    pass_str.as_str(),
+                ])
+                .unwrap();
             }
         } else {
-            writer
-                .write_record(["package", "function", "metric", "value"])
+            wtr.write_record(["package", "function", "metric", "value"])
                 .unwrap();
-            for report in reports {
-                if let Some(value) = report.value {
-                    let value = value.to_string();
-                    writer
-                        .write_record([
-                            report.package.as_str(),
-                            report.function.as_str(),
-                            report.metric,
-                            value.as_str(),
-                        ])
-                        .unwrap();
+            for r in reports {
+                if r.value.is_some() {
+                    let value_str = r.value.map(|v| v.to_string()).unwrap_or_default();
+                    wtr.write_record([
+                        r.package.as_str(),
+                        r.function.as_str(),
+                        r.metric,
+                        value_str.as_str(),
+                    ])
+                    .unwrap();
                 }
             }
         }
-        writer.flush().unwrap();
-        String::from_utf8(writer.into_inner().unwrap()).unwrap()
+        wtr.flush().unwrap();
+        String::from_utf8(wtr.into_inner().unwrap()).unwrap()
     }
 
     #[test]
@@ -440,6 +459,8 @@ cpu_limit = 5000000
         let csv = reports_to_csv(&reports, false);
         assert!(csv.contains(&u32::MAX.to_string()));
     }
+
+    // ── BudgetToml / FunctionConfig default additional tests ───────────
 
     #[test]
     fn budget_toml_default_network_is_none() {
