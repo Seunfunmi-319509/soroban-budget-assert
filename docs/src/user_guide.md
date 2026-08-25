@@ -4,7 +4,7 @@ This guide is for Soroban developers who want budget assertions in an existing c
 
 ## Prerequisites
 
-- Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`)
+- Rust with the `wasm32v1-none` target (`rustup target add wasm32v1-none`)
 - The `stellar` CLI
 - A funded testnet identity: `stellar keys generate alice --network testnet --fund`
 
@@ -113,7 +113,7 @@ Build the WASM, then run the tests, on every push and pull request:
 
 ```yaml
 - name: Build contracts
-  run: cargo build -p my-contract --release --target wasm32-unknown-unknown
+  run: cargo build -p my-contract --release --target wasm32v1-none
 
 - name: Budget assertions
   run: cargo test

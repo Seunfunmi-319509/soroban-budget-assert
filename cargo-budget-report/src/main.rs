@@ -35,6 +35,12 @@ const MAX_DEPLOY_ATTEMPTS: u32 = 4;
 /// subsequent attempt (2 s → 4 s → 8 s).
 const INITIAL_RETRY_DELAY_SECS: u64 = 2;
 
+/// WASM target used for every contract build and measurement.
+///
+/// Keep this aligned with `rust-toolchain.toml` so a clean checkout has the
+/// target required by the report CLI without installing an additional target.
+const WASM_TARGET: &str = "wasm32v1-none";
+
 /// `[retry]` section of `budget.toml`.
 ///
 /// Both fields are optional; missing values fall back to the built-in
@@ -1021,7 +1027,7 @@ fn run_preflight_checks(quiet: bool) -> Result<()> {
     }
     // ── wasm32 target ───────────────────────────────────────────────────
     if !quiet {
-        eprint!("Checking wasm32-unknown-unknown target... ");
+        eprint!("Checking {} target... ", WASM_TARGET);
     }
     let rustup_check = Command::new("rustup")
         .args(["target", "list", "--installed"])
@@ -1043,17 +1049,17 @@ fn run_preflight_checks(quiet: bool) -> Result<()> {
             let installed = String::from_utf8_lossy(&output.stdout);
             if installed
                 .lines()
-                .any(|line| line.trim() == "wasm32-unknown-unknown")
+                .any(|line| line.trim() == WASM_TARGET)
             {
                 if !quiet {
                     eprintln!("found");
                 }
             } else {
-                return Err(Error::Message(
-                    "wasm32-unknown-unknown target is not installed.\n\
-                     Install it with:  rustup target add wasm32-unknown-unknown"
-                        .to_string(),
-                ));
+                return Err(Error::Message(format!(
+                    "{} target is not installed.\n\
+                     Install it with:  rustup target add {}",
+                    WASM_TARGET, WASM_TARGET
+                )));
             }
         }
     }
@@ -1411,7 +1417,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         if !args.quiet {
-            eprintln!("Building package '{}' for wasm32...", package.name);
+            eprintln!("Building package '{}' for {}...", package.name, WASM_TARGET);
         }
         let build_status = Command::new("cargo")
             .args([
@@ -1419,7 +1425,7 @@ fn main() -> anyhow::Result<()> {
                 "-p",
                 &package.name,
                 "--target",
-                "wasm32-unknown-unknown",
+                WASM_TARGET,
                 "--profile",
                 build_profile,
             ])
@@ -1449,7 +1455,7 @@ fn main() -> anyhow::Result<()> {
         };
         let wasm_path = metadata
             .target_directory
-            .join("wasm32-unknown-unknown")
+            .join(WASM_TARGET)
             .join(build_profile)
             .join(format!("{}.wasm", wasm_name));
 

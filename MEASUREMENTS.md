@@ -8,6 +8,12 @@ Each measurement compares a local budget estimate against a network-verified fig
 
 The WASM is compiled with the profile specified in the **Build profile** column. The direction of the local-vs-network gap is not stable across profiles; the same contract built with Cargo's default release profile can produce a gap pointing in the opposite direction of one built with the size-optimization profile. Every figure includes its build context.
 
+## WASM target decision
+
+The project measures `wasm32v1-none`. This is the target installed by `rust-toolchain.toml`, used by the CI contract build, and used by the WASM-backed contract tests. `cargo-budget-report` uses the same target for its preflight check, Cargo build, artifact lookup, deployment, and simulation, so the report describes the binary produced by the documented build.
+
+Existing figures that do not record a target triple remain historical measurements and are intentionally not relabeled or regenerated silently. A clean two-target comparison for `amm-pool-contract` (`wasm32v1-none` versus `wasm32-unknown-unknown`) requires a Rust toolchain and funded testnet measurement environment; that comparison was not reproducible in the current development environment because neither Rust/Cargo nor a testnet identity was available. The first post-merge measurement should record both target triples and report WASM bytes, CPU instructions, read bytes, and write bytes side by side before updating any published baseline.
+
 For the storage-write measurement, the complete capture record is checked in at [`cargo-budget-report/fixtures/storage_write_benchmark.json`](cargo-budget-report/fixtures/storage_write_benchmark.json). It records the fixture arguments, local capture command, network capture method, both figures, and the calculated delta.
 
 ### Column reference
@@ -50,7 +56,7 @@ The storage-write row isolates the `write_bytes` fixture with a 1,024-byte value
 The storage-read row isolates `do_read_heavy_work` with 100 keys (25,600 bytes of reads). Unlike the write measurement, the read fixture necessarily includes a write phase (to populate the keys before reading them). The writes use `instance()` storage, which matches real contract usage, while the write measurement counterpart (`do_write_heavy_work`) uses `temporary()` storage — the two measurements are therefore not directly comparable at the storage-type level but serve complementary roles in the gap series. The `set()` calls in the write phase may contribute incidental `read_bytes` from internal ledger existence checks, so the measured figure includes a small write-phase read component in addition to the explicit read phase.
 
 ```bash
-cargo build --target wasm32-unknown-unknown --release -p amm-pool-contract
+cargo build --target wasm32v1-none --release -p amm-pool-contract
 cargo test -p amm-pool-contract test_storage_read_wasm_local -- --nocapture
 ```
 
@@ -65,14 +71,14 @@ The existing measurement series (above) shows the local-vs-network gap can flip 
 Each measurement uses the same contract (`amm-pool-contract`), the same function (`do_expensive_work(10_000)`), and the same build profile (workspace `[profile.release]`: `opt-level="z"`, LTO, `codegen-units=1`). Only the soroban-sdk version changes. The local WASM estimate is collected by the `calibrate_gap` test in `amm-pool-contract/tests/calibrate_gap.rs`:
 
 ```
-cargo build --target wasm32-unknown-unknown --release -p amm-pool-contract
+cargo build --target wasm32v1-none --release -p amm-pool-contract
 cargo test -p amm-pool-contract calibrate_gap -- --nocapture
 ```
 
 SDK 20 and 21 use `env.budget()` instead of `env.cost_estimate().budget()`.  For those versions, run with `--features sdk20` and use the `calibrate_gap_sdk20` test binary:
 
 ```
-cargo build --target wasm32-unknown-unknown --release -p amm-pool-contract
+cargo build --target wasm32v1-none --release -p amm-pool-contract
 cargo test -p amm-pool-contract --features sdk20 --test calibrate_gap_sdk20 calibrate_gap -- --nocapture
 ```
 
@@ -98,7 +104,7 @@ The network figure column requires a separate `cargo-budget-report` run on Sorob
 
 1. Pin the desired soroban-sdk version in `amm-pool-contract/Cargo.toml` (both `[dependencies]` and `[dev-dependencies]`).
 2. Run `cargo update -p soroban-sdk` to resolve.
-3. Build the WASM: `cargo build --target wasm32-unknown-unknown --release -p amm-pool-contract`.
+3. Build the WASM: `cargo build --target wasm32v1-none --release -p amm-pool-contract`.
 4. Collect local estimate: `cargo test -p amm-pool-contract calibrate_gap -- --nocapture`.
 5. For the network figure, deploy the WASM to testnet and run `cargo run --bin cargo-budget-report -- --network testnet` (see [Network simulation in mechanics.md](docs/src/mechanics.md#tier-b-network-simulation-cargo-budget-report)).
 6. Compute delta = (local − network) / network and add a row to the table above.

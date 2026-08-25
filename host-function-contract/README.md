@@ -15,7 +15,7 @@ the operation in a WASM-registered Soroban test and read
 `env.cost_estimate().budget().cpu_insns()`:
 
 ```bash
-cargo build --release --target wasm32-unknown-unknown
+cargo build --release --target wasm32v1-none
 ```
 
 The local estimate recorded for this fixture was **1,280,000 CPU

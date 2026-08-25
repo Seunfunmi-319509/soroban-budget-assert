@@ -22,11 +22,11 @@
       "network_figure": null,
       "delta": null,
       "delta_percent": null,
-      "note": "Run cargo build --target wasm32-unknown-unknown --release -p amm-pool-contract && cargo test -p amm-pool-contract --test calibrate_extend_ttl -- --nocapture to collect local_estimate. Run cargo run --bin cargo-budget-report -- --network testnet to collect network_figure."
+      "note": "Run cargo build --target wasm32v1-none --release -p amm-pool-contract && cargo test -p amm-pool-contract --test calibrate_extend_ttl -- --nocapture to collect local_estimate. Run cargo run --bin cargo-budget-report -- --network testnet to collect network_figure."
     }
   },
   "capture": {
-    "local_command": "cargo build --target wasm32-unknown-unknown --release -p amm-pool-contract && cargo test -p amm-pool-contract --test calibrate_extend_ttl -- --nocapture",
+    "local_command": "cargo build --target wasm32v1-none --release -p amm-pool-contract && cargo test -p amm-pool-contract --test calibrate_extend_ttl -- --nocapture",
     "network_command": "cargo run --bin cargo-budget-report -- --fixture cargo-budget-report/fixtures/ttl_extension_benchmark.json",
     "recorded_at": null
   }

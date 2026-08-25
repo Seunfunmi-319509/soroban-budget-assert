@@ -64,7 +64,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.0
-          targets: wasm32v1-none wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache Rust Dependencies
         uses: Swatinem/rust-cache@v2
@@ -141,7 +141,7 @@ jobs:
 Checks out the repository so subsequent steps have access to the source code. `fetch-depth: 0` ensures full Git history is available for operations like commit comparison and `record-history`.
 
 ### `dtolnay/rust-toolchain`
-Installs the Rust toolchain pinned to the version you measure with locally. The `targets` argument installs `wasm32v1-none` (Soroban target) and `wasm32-unknown-unknown` (fallback target). Keep the pin aligned with the `channel` in your `rust-toolchain.toml`, or local and CI numbers will drift apart.
+Installs the Rust toolchain pinned to the version you measure with locally. The `targets` argument installs the project's `wasm32v1-none` measurement target. Keep the pin aligned with the `channel` in your `rust-toolchain.toml`, or local and CI numbers will drift apart.
 
 ### `Swatinem/rust-cache`
 Caches compiled Rust dependencies between runs. Speeds up subsequent workflow executions significantly. The cache key is derived from `Cargo.lock` and the toolchain version, so it invalidates automatically when dependencies change.
@@ -204,7 +204,7 @@ steps:
     uses: dtolnay/rust-toolchain@stable
     with:
       toolchain: ${{ matrix.toolchain }}
-      targets: wasm32v1-none wasm32-unknown-unknown
+      targets: wasm32v1-none
 ```
 
 Note that changing the Rust version may produce different WASM and therefore different budget numbers. The pinned version in `rust-toolchain.toml` is what this project's measurements are based on.

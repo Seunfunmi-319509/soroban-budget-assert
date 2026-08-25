@@ -69,7 +69,7 @@ With those gates in place, fork PRs skip the testnet steps entirely (or fall bac
 ## Prerequisites
 
 - A Soroban contract repo with at least one `cdylib` package.
-- Rust and the WASM target installed locally (this repo builds `wasm32v1-none`; older SDK setups use `wasm32-unknown-unknown`).
+- Rust with the `wasm32v1-none` target installed locally.
 - Push access to `.github/workflows/*` on the target repo.
 
 For Tier B only:
@@ -132,7 +132,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.0
-          targets: wasm32v1-none wasm32-unknown-unknown
+          targets: wasm32v1-none wasm32v1-none
 
       - name: Install System Dependencies
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config libudev-dev
