@@ -91,6 +91,7 @@ The network figure column requires a separate `cargo-budget-report` run on Sorob
 | `20.0.0` | `20.5.0` | 6,606,666 | 1,942,982 | — | — | — | 2026-Q3 | `rustc 1.85.0` |
 | `21.0.0` (≈`21.7.7`)^* | `21.7.7` | 2,653,878 | 1,658,163 | — | — | — | 2026-Q3 | `rustc 1.85.0` |
 | `22.0.0` | `22.0.11` | 2,654,615 | 1,658,706 | — | — | — | 2026-Q3 | `rustc 1.85.0` |
+| `27.0.3` | `27.0.6` | 803,497 | 1,441,165 | — | — | — | 2026-08 | `rustc 1.91.0` |
 
 > ^* SDK 21.0.0 is yanked; the lowest resolvable 21.x patch is 21.7.7.
 
@@ -98,7 +99,9 @@ The network figure column requires a separate `cargo-budget-report` run on Sorob
 
 > **Note on SDK 20 API.** soroban-sdk 20.x uses `env.budget()` instead of `env.cost_estimate().budget()`. A separate test file (`calibrate_gap_sdk20.rs`) is gated behind the `sdk20` Cargo feature and provides the same measurement.
 
-> **Temporary workspace constraints.** The workspace's `cargo-budget-report` crate requires `stellar-xdr ^22.1.0`, which limits long-term compatible soroban-sdk versions to the 22.0.x line. SDK 20 and 21 are tested by temporarily loosening the `stellar-xdr` constraint and regenerating the lockfile. These constraints are workspace-specific and should be re-evaluated when the project upgrades to a newer SDK baseline.
+> **Workspace SDK baseline (issue #382).** The workspace is now on `soroban-sdk 27` / `stellar-xdr 27`. SDK 20 and 21 rows above were taken under the old 22.x baseline; regenerating them requires temporarily loosening the version pins and the lockfile, and `--features sdk20` no longer resolves against `stellar-xdr 27`. Note also that soroban-sdk 27 **refuses to build for `wasm32-unknown-unknown` on rustc ≥ 1.82** (`reference-types` / `multi-value` are enabled and unsupported) — every WASM build and every calibration test now targets `wasm32v1-none`.
+>
+> **Protocol 23 read-bytes split.** `SorobanResources.read_bytes` became `disk_read_bytes`, and `Env::cost_estimate().resources()` exposes `disk_read_bytes` (disk-backed reads only) plus `memory_read_entries` (live in-memory state). For a contract whose state is all live Soroban entries — like `amm-pool-contract` — `disk_read_bytes` is now `0`. The `#[budget_read_bytes_lt]` macro is unaffected: it proxies through `memory_bytes_cost()`, not the XDR field.
 
 ### How to regenerate
 
@@ -118,6 +121,9 @@ A reusable script at `amm-pool-contract/calibrate_gap.ps1` automates steps 1–4
 | 20.5.0 | 6,606,666 | 1,942,982 | +148.9% | +17.1% |
 | 21.7.7 | 2,653,878 | 1,658,163 | −0.03% | −0.03% |
 | 22.0.11 | 2,654,615 | 1,658,706 | — | — |
+| 27.0.6 | 803,497 | 1,441,165 | −69.7% | −13.1% |
+
+soroban-sdk 27 is dramatically cheaper on CPU (−70% vs SDK 22) and moderately cheaper on memory (−13%). This is a large enough shift that assertions written against SDK 22 local estimates over-provision badly under SDK 27 — the deliberate-regression fixture `test_budget_macro_deliberate_regression` stopped firing at its old `1_000_000` CPU ceiling and was dropped to `1`. Tier A limits derived before this bump should be re-derived from a fresh Tier B report.
 
 SDK 20 is dramatically more expensive (+149% CPU) because its `vm.exec` cost model uses a much higher per-instruction multiplier. SDK 21 and 22 are practically identical at the local-estimate level — the CPU delta is 737 instructions (−0.03%) and the memory delta is 543 bytes (−0.03%), well within measurement noise.
 
@@ -200,7 +206,7 @@ To reproduce this measurement:
 4. Deploy the WASM to Soroban testnet and run `cargo run --bin cargo-budget-report -- --network testnet`.
 5. Read `Memory Bytes` from the per-function row in the resulting report (or from `--json` output), and update the `Network mem` column.
 6. Compute delta = `(local − network) / network` and add it to the table.
-The host-function row uses a separate fixture that performs 1,000 calls to `env.ledger().sequence()`. It does not perform storage operations, so the reported values isolate the repeated host-function-call workload. The local estimate was obtained from the WASM-registered contract's `cost_estimate().budget()`, and the network figure was obtained from the corresponding testnet `simulateTransaction` response.
+The host-function row uses the dedicated [`host-function-contract`](host-function-contract/README.md) fixture crate that performs 1,000 calls to `env.ledger().sequence()`. It does not perform storage operations or compute loops, so the reported values isolate the repeated host-function-call workload from other billing components. The local estimate was obtained from the WASM-registered contract's `cost_estimate().budget()`, and the network figure was obtained from the corresponding testnet `simulateTransaction` response. For build and reproduction instructions, see [`host-function-contract/README.md`](host-function-contract/README.md).
 | VM-instruction-only (WASM) | 689,312 | 634,912 | +8.6% | `amm-pool-contract::do_vm_instruction_work(10_000)` | size-opt (`opt-level="z"`, LTO, `codegen-units=1`) | rustc 1.81 | 2025-Q2 |
 
 The native Rust row is included solely to illustrate that native estimates are unreliable for budget decisions. Only WASM-mode estimates should be used for assertions.
