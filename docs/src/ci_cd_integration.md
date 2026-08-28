@@ -1,4 +1,4 @@
-# CI/CD Integration with GitHub Actions
+# CI/CD Integration
 
 This page is a reference for integrating **soroban-budget-assert** into a **GitHub Actions CI/CD pipeline**. It covers the complete example workflow, explains each step, and provides guidance on customization and troubleshooting.
 
@@ -369,3 +369,4 @@ Friendbot-funded accounts are reset periodically. If the workflow has been idle 
 - [Tool Reference](reference.md) — every CLI flag and macro signature.
 - [Developer Guide](developer_guide.md) — building and extending the tool itself.
 - [Measurements](measurements.md) — the measured gap between local and network costs.
+This page has been merged into the [End-to-End CI Tutorial](ci_tutorial.md). Please update your bookmarks.
