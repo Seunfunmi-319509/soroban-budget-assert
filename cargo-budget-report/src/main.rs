@@ -1054,7 +1054,6 @@ fn run_preflight_checks(quiet: bool) -> Result<()> {
     // ── wasm32 target ───────────────────────────────────────────────────
     if !quiet {
         eprint!("Checking {} target... ", WASM_TARGET);
-        eprint!("Checking wasm32v1-none target... ");
     }
     let rustup_check = Command::new("rustup")
         .args(["target", "list", "--installed"])
@@ -1075,7 +1074,6 @@ fn run_preflight_checks(quiet: bool) -> Result<()> {
         Ok(output) => {
             let installed = String::from_utf8_lossy(&output.stdout);
             if installed.lines().any(|line| line.trim() == WASM_TARGET) {
-            if installed.lines().any(|line| line.trim() == "wasm32v1-none") {
                 if !quiet {
                     eprintln!("found");
                 }
@@ -1085,11 +1083,6 @@ fn run_preflight_checks(quiet: bool) -> Result<()> {
                      Install it with:  rustup target add {}",
                     WASM_TARGET, WASM_TARGET
                 )));
-                return Err(Error::Message(
-                    "wasm32v1-none target is not installed.\n\
-                     Install it with:  rustup target add wasm32v1-none"
-                        .to_string(),
-                ));
             }
         }
     }
