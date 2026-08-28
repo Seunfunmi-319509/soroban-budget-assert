@@ -1520,7 +1520,6 @@ fn main() -> anyhow::Result<()> {
                 package.name.as_str(),
                 "--target",
                 WASM_TARGET,
-                "wasm32v1-none",
                 "--profile",
                 build_profile,
             ])
@@ -1551,7 +1550,6 @@ fn main() -> anyhow::Result<()> {
         let wasm_path = metadata
             .target_directory
             .join(WASM_TARGET)
-            .join("wasm32v1-none")
             .join(build_profile)
             .join(format!("{}.wasm", wasm_name));
 
